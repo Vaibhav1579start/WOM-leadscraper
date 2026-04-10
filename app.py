@@ -17,7 +17,7 @@ init_db()
 st.title("🎭 WoM Lead Generation & Outreach Tool")
 tabs = st.tabs(["🧠 Smart Search", "🔍 Search & Pick", "✍️ Manual Entry", "🗄️ Database", "📤 Outreach", "📖 Guide"])
 
-# ─── SMART SEARCH ────────────────────────────────────────────────────────────
+# ─── SMART SEARCH ───────────────────────────────────────────────────────────
 with tabs[0]:
     st.header("🧠 Smart Search — Natural Language")
     st.caption("Type naturally, e.g. *'I need a magician in Nagpur'* or *'find DJs in Mumbai for a wedding'*")
@@ -31,14 +31,19 @@ with tabs[0]:
     if smart_btn and smart_q:
         with st.spinner("🤖 Parsing your request and searching..."):
             out = smart_search(smart_q)
+        st.session_state["smart_results"] = out
+    
+    if "smart_results" in st.session_state and smart_q:
+        out = st.session_state["smart_results"]
         parsed = out["parsed"]
         results = out["results"]
         
         st.info(f"🧠 Detected: **Role** = `{parsed['role']}` | **City** = `{parsed['city'] or 'Any'}` | **Search query** = `{parsed['rewrite']}`")
         st.success(f"✅ Found **{len(results)}** results")
 
-        for r in results:
-            with st.expander(f"{'@'+r['username'] if r.get('username') else r.get('full_name','?')} — {r.get('follower_tier','')} — {r.get('category','')}"):
+        for i, r in enumerate(results):
+            uname = r.get("username", "") or f"result_{i}"
+            with st.expander(f"{'@'+results[i]['username'] if r.get('username') else r.get('full_name','?')} — {r.get('follower_tier','')} — {r.get('category','')}"):
                 c1, c2 = st.columns([3,1])
                 with c1:
                     st.markdown(f"**Bio:** {r.get('bio','')[:200]}")
@@ -47,7 +52,7 @@ with tabs[0]:
                     st.caption(f"🔗 {r.get('url','')}")
                 with c2:
                     st.metric("Followers", r.get("followers",0))
-                    if st.button("✅ Pick", key=f"smart_pick_{r.get('username','')}"):
+                    if st.button("✅ Pick", key=f"smart_pick_{i}_{uname}"):
                         result = process_and_save({**r, "source":"smart_search"})
                         if result["success"]:
                             st.success("✅ Saved to database!")
@@ -57,35 +62,50 @@ with tabs[0]:
 # ─── SEARCH & PICK ───────────────────────────────────────────────────────────
 with tabs[1]:
     st.header("🔍 Instagram Artist Search")
+    st.caption("Enter a name, keyword, or category below and click Search to find Instagram profiles.")
+    
     col1, col2, col3 = st.columns(3)
     with col1:
-        s_query = st.text_input("Search query", placeholder="wedding DJ Mumbai")
+        s_query = st.text_input("Search query", placeholder="wedding DJ Mumbai", key="s_query")
     with col2:
-        s_city = st.text_input("City", placeholder="Mumbai")
+        s_city = st.text_input("City (optional)", placeholder="Mumbai", key="s_city")
     with col3:
-        s_category = st.selectbox("Category", ["","DJ","Singer","Musician","Magician","Comedian","Dancer","Anchor","Band","Photographer","Videographer","Decorator","Caterer"])
+        s_category = st.selectbox("Category", ["","DJ","Singer","Musician","Magician","Comedian","Dancer","Anchor","Band","Photographer","Videographer","Decorator","Caterer"], key="s_cat")
 
-    if st.button("🔍 Search Instagram", use_container_width=True):
-        with st.spinner("Searching..."):
-            results = search_instagram_artists(s_query, s_city, s_category)
+    search_clicked = st.button("🔍 Search Instagram", use_container_width=True, key="search_ig_btn")
+    
+    if search_clicked:
+        if not s_query and not s_city and not s_category:
+            st.warning("⚠️ Please enter at least a search query, city, or select a category first.")
+        else:
+            with st.spinner("Searching Instagram..."):
+                results = search_instagram_artists(s_query, s_city, s_category)
+            st.session_state["search_results"] = results
+            st.session_state["search_done"] = True
+
+    if st.session_state.get("search_done") and "search_results" in st.session_state:
+        results = st.session_state["search_results"]
         st.success(f"Found {len(results)} results")
-        st.session_state["search_results"] = results
+        
+        if not results:
+            st.info("No results found. Try different keywords or city.")
+        
+        for i, r in enumerate(results):
+            uname = r.get("username", "") or f"result_{i}"
+            with st.expander(f"@{uname} — {r.get('follower_tier','')} — {r.get('category','')}"):
+                c1, c2 = st.columns([3,1])
+                with c1:
+                    st.markdown(f"**Bio:** {r.get('bio','')[:200]}")
+                    if r.get("contacts_summary"):
+                        st.markdown(f"📇 {r['contacts_summary']}")
+                    st.caption(r.get("url",""))
+                with c2:
+                    st.metric("Followers", r.get("followers",0))
+                    if st.button("✅ Pick", key=f"pick_{i}_{uname}"):
+                        result = process_and_save({**r, "source":"search"})
+                        st.success("Saved!" if result["success"] else f"Error: {result['error']}")
 
-    for r in st.session_state.get("search_results", []):
-        with st.expander(f"@{r.get('username','?')} — {r.get('follower_tier','')} — {r.get('category','')}"):
-            c1, c2 = st.columns([3,1])
-            with c1:
-                st.markdown(f"**Bio:** {r.get('bio','')[:200]}")
-                if r.get("contacts_summary"):
-                    st.markdown(f"📇 {r['contacts_summary']}")
-                st.caption(r.get("url",""))
-            with c2:
-                st.metric("Followers", r.get("followers",0))
-                if st.button("✅ Pick", key=f"pick_{r.get('username','')}"):
-                    result = process_and_save({**r, "source":"search"})
-                    st.success("Saved!" if result["success"] else f"Error: {result['error']}")
-
-# ─── MANUAL ENTRY ────────────────────────────────────────────────────────────
+# ─── MANUAL ENTRY ───────────────────────────────────────────────────────────
 with tabs[2]:
     st.header("✍️ Manual Lead Entry")
     with st.form("manual_form"):
@@ -107,7 +127,7 @@ with tabs[2]:
             result = process_and_save(lead)
             st.success("✅ Lead saved!" if result["success"] else f"❌ {result['error']}")
 
-# ─── DATABASE ────────────────────────────────────────────────────────────────
+# ─── DATABASE ─────────────────────────────────────────────────────────────────
 with tabs[3]:
     st.header("🗄️ Lead Database")
     col1, col2, col3 = st.columns(3)
@@ -142,24 +162,24 @@ with tabs[3]:
     else:
         st.info("No leads yet. Use Search or Smart Search to find and pick artists.")
 
-# ─── OUTREACH ────────────────────────────────────────────────────────────────
+# ─── OUTREACH ───────────────────────────────────────────────────────────────
 with tabs[4]:
     st.header("📤 Outreach Manager")
     leads = get_all_leads(status_filter="new")
     st.metric("Leads Ready for Outreach", len(leads))
     
     if leads:
-        for lead in leads[:DAILY_DM_LIMIT]:
+        for i, lead in enumerate(leads[:DAILY_DM_LIMIT]):
             with st.expander(f"@{lead['username']} — {lead['category']} — {lead.get('city','')}"):
                 dm = generate_dm(lead)
-                st.text_area("DM Message", dm, key=f"dm_{lead['username']}", height=100)
+                st.text_area("DM Message", dm, key=f"dm_{i}_{lead['username']}", height=100)
                 contacts = []
                 if lead.get("emails"):    contacts.append(f"📧 {lead['emails']}")
                 if lead.get("phones"):    contacts.append(f"📞 {lead['phones']}")
                 if lead.get("whatsapp"): contacts.append(f"💬 WA: {lead['whatsapp']}")
                 if contacts:
                     st.info("Contacts: " + " | ".join(contacts))
-                if st.button(f"✅ Mark as Contacted", key=f"contact_{lead['username']}"):
+                if st.button(f"✅ Mark as Contacted", key=f"contact_{i}_{lead['username']}"):
                     update_lead_status(lead["username"], "contacted")
                     st.success("Marked as contacted!")
     else:
@@ -169,10 +189,10 @@ with tabs[4]:
 with tabs[5]:
     st.header("📖 How to Use WoM Lead Tool")
     st.markdown("""
-### 🚀 Quick Start
-1. **🧠 Smart Search** — Type naturally: *"I need a DJ in Mumbai"*
-2. **🔍 Search & Pick** — Manual keyword search with filters
-3. **✅ Pick** — Saves artist to database with contact details
+### 🚠 Quick Start
+1. **🧠 Smart Search* * — Type naturally: *"I need a DJ in Mumbai"*
+2. **🔍 Search & Pick** — Type a name/keyword, select category, click Search
+3. **✅ Pick** — Click Pick on any profile to save it to your database
 4. **🗄️ Database** — View, filter, export all saved leads
 5. **📤 Outreach** — Auto-generate DMs, mark as contacted
 
